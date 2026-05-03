@@ -88,5 +88,8 @@ spl_autoload_register(
 	}
 );
 
+// Ability runner helper — lets command methods delegate to registered abilities.
+require_once EXTRACHILL_CLI_PATH . 'inc/ability-runner.php';
+
 // Register commands.
 require_once EXTRACHILL_CLI_PATH . 'inc/bootstrap.php';
