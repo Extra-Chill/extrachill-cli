@@ -55,17 +55,23 @@ class CommunityCommand {
 	 *
 	 * ## OPTIONS
 	 *
-	 * [--limit=<limit>]
-	 * : Number of users to show.
+	 * [--page=<page>]
+	 * : Page number to show.
+	 * ---
+	 * default: 1
+	 * ---
+	 *
+	 * [--per_page=<per_page>]
+	 * : Number of users per page (1-100).
 	 * ---
 	 * default: 25
 	 * ---
 	 *
+	 * [--limit=<limit>]
+	 * : Deprecated alias for --per_page. Number of users to show.
+	 *
 	 * [--offset=<offset>]
-	 * : Pagination offset.
-	 * ---
-	 * default: 0
-	 * ---
+	 * : Deprecated pagination offset. Translated to a page number using per_page.
 	 *
 	 * [--format=<format>]
 	 * : Output format.
@@ -80,7 +86,8 @@ class CommunityCommand {
 	 * ## EXAMPLES
 	 *
 	 *     wp extrachill community leaderboard --url=community.extrachill.com
-	 *     wp extrachill community leaderboard --limit=10 --url=community.extrachill.com
+	 *     wp extrachill community leaderboard --per_page=10 --url=community.extrachill.com
+	 *     wp extrachill community leaderboard --page=2 --per_page=10 --url=community.extrachill.com
 	 *
 	 * @when after_wp_load
 	 */
@@ -90,14 +97,26 @@ class CommunityCommand {
 			WP_CLI::error( 'extrachill/users-leaderboard ability not available. Is extrachill-users active on this site?' );
 		}
 
-		$limit  = isset( $assoc_args['limit'] ) ? (int) $assoc_args['limit'] : 25;
-		$offset = isset( $assoc_args['offset'] ) ? (int) $assoc_args['offset'] : 0;
 		$format = isset( $assoc_args['format'] ) ? (string) $assoc_args['format'] : 'table';
 
 		// The canonical users-leaderboard ability paginates by page/per_page.
-		// Translate the legacy limit/offset flags into a page number.
-		$per_page = max( 1, min( 100, $limit ) );
-		$page     = (int) floor( $offset / $per_page ) + 1;
+		// Prefer --page/--per_page; fall back to the legacy --limit/--offset flags.
+		if ( isset( $assoc_args['per_page'] ) ) {
+			$per_page = (int) $assoc_args['per_page'];
+		} elseif ( isset( $assoc_args['limit'] ) ) {
+			$per_page = (int) $assoc_args['limit'];
+		} else {
+			$per_page = 25;
+		}
+		$per_page = max( 1, min( 100, $per_page ) );
+
+		if ( isset( $assoc_args['page'] ) ) {
+			$page = max( 1, (int) $assoc_args['page'] );
+		} elseif ( isset( $assoc_args['offset'] ) ) {
+			$page = (int) floor( (int) $assoc_args['offset'] / $per_page ) + 1;
+		} else {
+			$page = 1;
+		}
 
 		$result = $ability->execute(
 			array(
@@ -119,21 +138,22 @@ class CommunityCommand {
 			return;
 		}
 
-		// Map the canonical leaderboard shape to the CLI's stable column set.
+		// Surface the canonical leaderboard fields directly as columns.
+		// `position` = leaderboard rank, `rank` = rank label string, `points` = total points.
 		$rows = array_map(
 			static function ( $item ) {
 				return array(
-					'rank'         => $item['position'] ?? '',
-					'user_login'   => $item['username'] ?? '',
+					'position'     => $item['position'] ?? '',
+					'username'     => $item['username'] ?? '',
 					'display_name' => $item['display_name'] ?? '',
-					'total_points' => $item['points'] ?? '',
-					'rank_name'    => $item['rank'] ?? '',
+					'points'       => $item['points'] ?? '',
+					'rank'         => $item['rank'] ?? '',
 				);
 			},
 			$items
 		);
 
-		Utils\format_items( $format, $rows, array( 'rank', 'user_login', 'display_name', 'total_points', 'rank_name' ) );
+		Utils\format_items( $format, $rows, array( 'position', 'username', 'display_name', 'points', 'rank' ) );
 	}
 
 	/**
