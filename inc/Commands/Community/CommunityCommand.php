@@ -85,19 +85,24 @@ class CommunityCommand {
 	 * @when after_wp_load
 	 */
 	public function leaderboard( $args, $assoc_args ) {
-		$ability = wp_get_ability( 'extrachill/community-get-leaderboard' );
+		$ability = wp_get_ability( 'extrachill/users-leaderboard' );
 		if ( ! $ability ) {
-			WP_CLI::error( 'extrachill/community-get-leaderboard ability not available. Is extrachill-community active on this site?' );
+			WP_CLI::error( 'extrachill/users-leaderboard ability not available. Is extrachill-users active on this site?' );
 		}
 
 		$limit  = isset( $assoc_args['limit'] ) ? (int) $assoc_args['limit'] : 25;
 		$offset = isset( $assoc_args['offset'] ) ? (int) $assoc_args['offset'] : 0;
 		$format = isset( $assoc_args['format'] ) ? (string) $assoc_args['format'] : 'table';
 
+		// The canonical users-leaderboard ability paginates by page/per_page.
+		// Translate the legacy limit/offset flags into a page number.
+		$per_page = max( 1, min( 100, $limit ) );
+		$page     = (int) floor( $offset / $per_page ) + 1;
+
 		$result = $ability->execute(
 			array(
-				'limit'  => $limit,
-				'offset' => $offset,
+				'page'     => $page,
+				'per_page' => $per_page,
 			)
 		);
 
@@ -105,14 +110,30 @@ class CommunityCommand {
 			WP_CLI::error( $result->get_error_message() );
 		}
 
-		WP_CLI::log( sprintf( 'Total users: %d', $result['total'] ) );
+		$total = isset( $result['pagination']['total'] ) ? (int) $result['pagination']['total'] : 0;
+		WP_CLI::log( sprintf( 'Total users: %d', $total ) );
 
-		if ( empty( $result['users'] ) ) {
+		$items = isset( $result['items'] ) && is_array( $result['items'] ) ? $result['items'] : array();
+		if ( empty( $items ) ) {
 			WP_CLI::log( 'No users found.' );
 			return;
 		}
 
-		Utils\format_items( $format, $result['users'], array( 'rank', 'user_login', 'display_name', 'total_points', 'rank_name' ) );
+		// Map the canonical leaderboard shape to the CLI's stable column set.
+		$rows = array_map(
+			static function ( $item ) {
+				return array(
+					'rank'         => $item['position'] ?? '',
+					'user_login'   => $item['username'] ?? '',
+					'display_name' => $item['display_name'] ?? '',
+					'total_points' => $item['points'] ?? '',
+					'rank_name'    => $item['rank'] ?? '',
+				);
+			},
+			$items
+		);
+
+		Utils\format_items( $format, $rows, array( 'rank', 'user_login', 'display_name', 'total_points', 'rank_name' ) );
 	}
 
 	/**
