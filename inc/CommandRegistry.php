@@ -44,6 +44,7 @@ class CommandRegistry {
 			'extrachill analytics growth'      => Commands\Analytics\GrowthCommand::class,
 			'extrachill analytics content-audit' => Commands\Analytics\ContentAuditCommand::class,
 			'extrachill analytics content-flags' => Commands\Analytics\ContentFlagsCommand::class,
+			'extrachill analytics revenue'     => Commands\Analytics\RevenueCommand::class,
 
 			// Events commands.
 			'extrachill events'                => Commands\Events\LocationCommand::class,
