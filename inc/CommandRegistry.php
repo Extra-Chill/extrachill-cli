@@ -43,6 +43,7 @@ class CommandRegistry {
 			'extrachill analytics retention'         => Commands\Analytics\RetentionCommand::class,
 			'extrachill analytics growth'            => Commands\Analytics\GrowthCommand::class,
 			'extrachill analytics conversion'        => Commands\Analytics\ConversionCommand::class,
+			'extrachill analytics crosslink-targets' => Commands\Analytics\CrosslinkTargetsCommand::class,
 			'extrachill analytics outbound'          => Commands\Analytics\OutboundCommand::class,
 			'extrachill analytics stickiness'        => Commands\Analytics\StickinessCommand::class,
 			'extrachill analytics content-audit'     => Commands\Analytics\ContentAuditCommand::class,
