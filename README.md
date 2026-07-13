@@ -114,6 +114,10 @@ Revenue commands are thin adapters over the Data Machine Business and Extra
 Chill Analytics abilities. Fetches replace the deterministic snapshot for the
 source site and period, so repeating a monthly fetch is safe.
 
+Use `--mode=additive --snapshot=<label>` only for an intentional parallel
+snapshot; the ingestion ability validates that mode and snapshot. The default
+`replace` mode owns deterministic snapshot identity in analytics.
+
 The legacy `revenue import` and `revenue batches` commands are intentionally
 retired. They bypassed the ability-owned ingestion identity and persistence
 contract; use `revenue fetch` for supported Mediavine ingestion.

@@ -36,8 +36,18 @@ class RevenueCommand {
 	 * ---
 	 * default: extrachill.com
 	 * ---
+	 * [--mode=<mode>]
+	 * : Ingestion mode. Additive snapshots require --snapshot.
+	 * ---
+	 * default: replace
+	 * options:
+	 *   - replace
+	 *   - additive
+	 * ---
+	 * [--snapshot=<label>]
+	 * : Explicit snapshot label, required only for --mode=additive.
 	 * [--dry-run]
-	 * : Fetch and plan deterministic replacement without writing.
+	 * : Fetch and plan ingestion without writing.
 	 *
 	 * ## EXAMPLES
 	 *
@@ -52,6 +62,14 @@ class RevenueCommand {
 		$ingest  = $this->ability( 'extrachill/ingest-revenue', 'Extra Chill Analytics' );
 		$periods = $this->fetch_periods( $assoc_args );
 		$dry_run = isset( $assoc_args['dry-run'] );
+		$mode    = $assoc_args['mode'] ?? 'replace';
+		$snapshot = $assoc_args['snapshot'] ?? '';
+		if ( ! in_array( $mode, array( 'replace', 'additive' ), true ) ) {
+			WP_CLI::error( '--mode must be replace or additive.' );
+		}
+		if ( 'additive' === $mode && '' === $snapshot ) {
+			WP_CLI::error( '--snapshot is required when --mode=additive.' );
+		}
 
 		$input = array( 'action' => 'backfill', 'periods' => $periods );
 		if ( isset( $assoc_args['site-id'] ) && '' !== $assoc_args['site-id'] ) {
@@ -63,12 +81,16 @@ class RevenueCommand {
 		$this->assert_success( $report, 'Mediavine fetch failed.' );
 
 		$summaries = array();
+		$errors    = array();
 		foreach ( (array) ( $report['periods'] ?? array() ) as $summary ) {
 			if ( ! empty( $summary['error'] ) ) {
-				WP_CLI::warning( sprintf( 'Period %s failed: %s', $summary['period'] ?? '(window)', $summary['error'] ) );
+				$errors[] = sprintf( '%s: %s', $summary['period'] ?? '(window)', $summary['error'] );
 				continue;
 			}
 			$summaries[ (string) ( $summary['period'] ?? '' ) ] = $summary;
+		}
+		if ( ! empty( $errors ) ) {
+			WP_CLI::error( 'Mediavine failed one or more periods; no revenue was ingested: ' . implode( '; ', $errors ) );
 		}
 
 		$rows_by_period = array();
@@ -90,6 +112,8 @@ class RevenueCommand {
 					'period'       => $period,
 					'period_start' => $this->report_date( $summary, 'start_date', 'start' ),
 					'period_end'   => $this->report_date( $summary, 'end_date', 'end' ),
+					'mode'         => $mode,
+					'snapshot'     => $snapshot,
 					'dry_run'      => $dry_run,
 				)
 			);
@@ -111,7 +135,7 @@ class RevenueCommand {
 		}
 
 		if ( ! $dry_run ) {
-			WP_CLI::success( 'Mediavine fetch complete. Re-fetching a period replaces its deterministic snapshot.' );
+			WP_CLI::success( 'additive' === $mode ? 'Mediavine fetch complete.' : 'Mediavine fetch complete. Re-fetching a period replaces its deterministic snapshot.' );
 		}
 	}
 
@@ -163,13 +187,15 @@ class RevenueCommand {
 		$this->assert_success( $result, 'Revenue pages query failed.' );
 
 		$format = $assoc_args['format'] ?? 'table';
-		if ( 'table' !== $format ) {
+		if ( 'json' === $format ) {
 			WP_CLI::print_value( $result, array( 'format' => $format ) );
 			return;
 		}
 
-		WP_CLI::log( sprintf( 'Content Revenue Pages - %s', $result['window'] ?? '' ) );
-		Utils\format_items( 'table', (array) ( $result['pages'] ?? array() ), $this->page_fields() );
+		if ( 'table' === $format ) {
+			WP_CLI::log( sprintf( 'Content Revenue Pages - %s', $result['window'] ?? '' ) );
+		}
+		Utils\format_items( $format, (array) ( $result['pages'] ?? array() ), $this->page_fields() );
 	}
 
 	/**
@@ -206,16 +232,20 @@ class RevenueCommand {
 		$this->assert_success( $result, 'Revenue rollup failed.' );
 
 		$format = $assoc_args['format'] ?? 'table';
-		if ( 'table' !== $format ) {
+		if ( 'json' === $format ) {
 			WP_CLI::print_value( $result, array( 'format' => $format ) );
 			return;
 		}
 
 		$limit = max( 1, (int) ( $assoc_args['limit'] ?? 50 ) );
+		$rows  = array();
 		foreach ( (array) ( $result['rollups'] ?? array() ) as $axis => $buckets ) {
-			WP_CLI::log( 'by_format' === $axis ? 'By content format:' : 'By category:' );
-			Utils\format_items( 'table', array_slice( $buckets, 0, $limit ), array( 'bucket', 'pages', 'views', 'revenue', 'dollars_per_page', 'rpm' ) );
+			foreach ( array_slice( $buckets, 0, $limit ) as $bucket ) {
+				$bucket['axis'] = $axis;
+				$rows[]         = $bucket;
+			}
 		}
+		Utils\format_items( $format, $rows, array( 'axis', 'bucket', 'pages', 'views', 'revenue', 'dollars_per_page', 'rpm' ) );
 	}
 
 	/**
@@ -241,12 +271,12 @@ class RevenueCommand {
 		$this->assert_success( $result, 'Revenue arc failed.' );
 
 		$format = $assoc_args['format'] ?? 'table';
-		if ( 'table' !== $format ) {
+		if ( 'json' === $format ) {
 			WP_CLI::print_value( $result, array( 'format' => $format ) );
 			return;
 		}
 
-		Utils\format_items( 'table', (array) ( $result['series'] ?? array() ), array( 'period', 'pages', 'views', 'revenue', 'mom_delta', 'mom_pct', 'rpm' ) );
+		Utils\format_items( $format, (array) ( $result['series'] ?? array() ), array( 'period', 'pages', 'views', 'revenue', 'mom_delta', 'mom_pct', 'rpm' ) );
 	}
 
 	/**
@@ -281,11 +311,14 @@ class RevenueCommand {
 		$this->assert_success( $result, 'Revenue diagnostics failed.' );
 
 		$format = $assoc_args['format'] ?? 'table';
-		if ( 'table' === $format ) {
-			WP_CLI::log( sprintf( 'Content Revenue Diagnostics - %s - %s', $result['window'] ?? '', strtoupper( $result['overall_status'] ?? 'fail' ) ) );
-			Utils\format_items( 'table', (array) ( $result['checks'] ?? array() ), array( 'check', 'status', 'evidence', 'totals' ) );
-		} else {
+		if ( 'json' === $format ) {
 			WP_CLI::print_value( $result, array( 'format' => $format ) );
+		} else {
+			$checks = $this->diagnostic_rows( (array) ( $result['checks'] ?? array() ) );
+			if ( 'table' === $format ) {
+				WP_CLI::log( sprintf( 'Content Revenue Diagnostics - %s - %s', $result['window'] ?? '', strtoupper( $result['overall_status'] ?? 'fail' ) ) );
+			}
+			Utils\format_items( $format, $checks, array( 'check', 'status', 'evidence', 'totals' ) );
 		}
 
 		if ( 'fail' === ( $result['overall_status'] ?? 'fail' ) ) {
@@ -307,14 +340,35 @@ class RevenueCommand {
 			if ( ! is_array( $periods ) || empty( $periods ) ) {
 				WP_CLI::error( '--periods must be a non-empty JSON array of {period, start_date, end_date} objects.' );
 			}
-			return $periods;
+			return $this->validate_periods( $periods );
 		}
 
 		$period = array( 'period' => $assoc_args['period'] ?? '', 'start_date' => $assoc_args['start'] ?? '', 'end_date' => $assoc_args['end'] ?? '' );
-		if ( '' === $period['period'] || '' === $period['start_date'] || '' === $period['end_date'] ) {
-			WP_CLI::error( '--start, --end, and --period are required unless --periods is provided.' );
+		return $this->validate_periods( array( $period ) );
+	}
+
+	private function validate_periods( $periods ) {
+		$labels = array();
+		foreach ( $periods as $entry ) {
+			if ( ! is_array( $entry ) || ! isset( $entry['period'] ) || '' === trim( (string) $entry['period'] ) || ! $this->valid_date( $entry['start_date'] ?? '' ) || ! $this->valid_date( $entry['end_date'] ?? '' ) ) {
+				WP_CLI::error( 'Every period must include a non-empty period plus valid start_date and end_date values in Y-m-d format.' );
+			}
+			if ( $entry['start_date'] > $entry['end_date'] ) {
+				WP_CLI::error( 'Every period start_date must be on or before end_date.' );
+			}
+			if ( isset( $labels[ $entry['period'] ] ) ) {
+				WP_CLI::error( sprintf( 'Duplicate period label: %s.', $entry['period'] ) );
+			}
+			$labels[ $entry['period'] ] = true;
 		}
-		return array( $period );
+		return $periods;
+	}
+
+	private function valid_date( $value ) {
+		if ( ! is_string( $value ) || ! preg_match( '/^(\d{4})-(\d{2})-(\d{2})$/', $value, $matches ) ) {
+			return false;
+		}
+		return checkdate( (int) $matches[2], (int) $matches[3], (int) $matches[1] );
 	}
 
 	private function ingest_rows( $rows ) {
@@ -342,8 +396,13 @@ class RevenueCommand {
 	}
 
 	private function report_date( $summary, $requested_key, $canonical_key ) {
-		$canonical = $summary['provenance']['period']['canonical'][ $canonical_key ] ?? '';
-		return '' !== $canonical ? str_replace( '/', '-', (string) $canonical ) : (string) ( $summary[ $requested_key ] ?? '' );
+		$requested = (string) ( $summary[ $requested_key ] ?? '' );
+		$canonical = $summary['provenance']['period']['canonical'][ $canonical_key ] ?? null;
+		if ( ! is_string( $canonical ) || '' === $canonical ) {
+			return $requested;
+		}
+		$canonical = str_replace( '/', '-', $canonical );
+		return $canonical === $requested ? $canonical : $requested;
 	}
 
 	private function assert_success( $result, $fallback ) {
@@ -356,6 +415,17 @@ class RevenueCommand {
 	}
 
 	private function page_fields() {
-		return array( 'cohort', 'post_id', 'title', 'url', 'categories', 'format', 'route_family', 'views', 'revenue', 'derived_rpm', 'source_rpm', 'cpm', 'viewability', 'fill_rate', 'impressions_per_pageview', 'zero_views', 'benchmark_opportunity' );
+		return array( 'cohort', 'post_id', 'title', 'url', 'format', 'views', 'revenue', 'dollars_per_page', 'derived_rpm', 'source_rpm', 'cpm', 'viewability', 'fill_rate', 'impressions_per_pageview', 'benchmark_score', 'benchmark_opportunity', 'zero_views' );
+	}
+
+	private function diagnostic_rows( $checks ) {
+		return array_map(
+			static function ( $check ) {
+				$check['evidence'] = wp_json_encode( $check['evidence'] ?? array() );
+				$check['totals']   = wp_json_encode( $check['totals'] ?? array() );
+				return $check;
+			},
+			$checks
+		);
 	}
 }
