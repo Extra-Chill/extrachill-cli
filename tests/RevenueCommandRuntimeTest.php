@@ -3,19 +3,28 @@
  * Exercises revenue argument validation through a real WP-CLI dispatcher.
  */
 
-$wp_path = getenv( 'WP_CLI_RUNTIME_PATH' );
-if ( false === $wp_path || '' === $wp_path ) {
-	fwrite( STDOUT, "RevenueCommand runtime test skipped: WP_CLI_RUNTIME_PATH is not set.\n" );
-	exit( 0 );
+$wp_path    = getenv( 'WP_CLI_RUNTIME_PATH' );
+$candidates = array_filter( array( $wp_path, '/var/www/extrachill.com', '/var/www/html', '/wordpress' ) );
+$wp_path    = '';
+foreach ( $candidates as $candidate ) {
+	$check = sprintf( 'wp --path=%s --allow-root --skip-plugins --skip-themes core is-installed 2>/dev/null', escapeshellarg( $candidate ) );
+	exec( $check, $ignored, $status );
+	if ( 0 === $status ) {
+		$wp_path = $candidate;
+		break;
+	}
+}
+if ( '' === $wp_path ) {
+	throw new RuntimeException( 'RevenueCommand runtime tests require an installed WordPress path.' );
 }
 
 $bootstrap = __DIR__ . '/RevenueCommandRuntimeBootstrap.php';
 $commands  = array(
-	'fetch --hostname=extrachill.com --dry-run',
-	'pages --hostname=extrachill.com --min-views=1000 --limit=25',
-	'rollup --hostname=extrachill.com --limit=100',
+	'fetch --start=2026-05-01 --end=2026-05-31 --period=2026-05 --periods=\'[{"period":"2026-05","start_date":"2026-05-01","end_date":"2026-05-31"}]\' --site-id=42 --hostname=extrachill.com --mode=additive --snapshot=test --dry-run',
+	'pages --period=2026-05 --period-start=2026-05-01 --period-end=2026-05-31 --batch=test --blog-id=1 --hostname=extrachill.com --cohort=resolved --min-views=1000 --sort-by=revenue --order=desc --limit=25 --format=json',
+	'rollup --group-by=both --period=2026-05 --period-start=2026-05-01 --period-end=2026-05-31 --batch=test --hostname=extrachill.com --limit=100 --format=json',
 	'arc --include-alltime --format=json',
-	'diagnose --hostname=extrachill.com --format=json',
+	'diagnose --period=2026-05 --period-start=2026-05-01 --period-end=2026-05-31 --batch=test --blog-id=1 --hostname=extrachill.com --format=json',
 );
 
 foreach ( $commands as $command ) {
