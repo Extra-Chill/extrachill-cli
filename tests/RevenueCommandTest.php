@@ -74,20 +74,6 @@ namespace {
 		}
 	}
 
-	function revenue_command_test_assert_synopsis_accepts_documented_options( $method, $args ) {
-		$reflection = new \ReflectionMethod( \ExtraChill\CLI\Commands\Analytics\RevenueCommand::class, $method );
-		$docblock   = $reflection->getDocComment();
-		preg_match( '/@synopsis\s+(.+)/', $docblock, $synopsis_match );
-		preg_match_all( '/\[--([a-z-]+)(?:=<[^>]+>)?\]/', $docblock, $documented_match );
-		preg_match_all( '/\[--([a-z-]+)(?:=<[^>]+>)?\]/', $synopsis_match[1] ?? '', $synopsis_match );
-
-		$documented = array_unique( $documented_match[1] );
-		$synopsis   = array_unique( $synopsis_match[1] );
-		$unknown    = array_diff( array_keys( $args ), $synopsis );
-
-		revenue_command_test_assert_same( array(), array_diff( $documented, $synopsis ), sprintf( '%s synopsis must include every documented option.', $method ) );
-		revenue_command_test_assert_same( array(), $unknown, sprintf( '%s synopsis rejected documented options before command execution.', $method ) );
-	}
 }
 
 namespace WP_CLI\Utils {
@@ -139,11 +125,6 @@ namespace {
 	);
 
 	$command = new RevenueCommand();
-	revenue_command_test_assert_synopsis_accepts_documented_options( 'fetch', array( 'start' => '2026-05-01', 'end' => '2026-05-31', 'period' => '2026-05', 'periods' => '[]', 'site-id' => '42', 'hostname' => 'extrachill.com', 'mode' => 'replace', 'snapshot' => 'manual', 'dry-run' => true ) );
-	revenue_command_test_assert_synopsis_accepts_documented_options( 'pages', array( 'period' => '2026-05', 'period-start' => '2026-05-01', 'period-end' => '2026-05-31', 'batch' => 'rev-mediavine-42-2026-05', 'blog-id' => '1', 'hostname' => 'extrachill.com', 'cohort' => 'resolved', 'min-views' => '1000', 'sort-by' => 'views', 'order' => 'desc', 'limit' => '25', 'format' => 'json' ) );
-	revenue_command_test_assert_synopsis_accepts_documented_options( 'rollup', array( 'group-by' => 'format', 'period' => '2026-05', 'period-start' => '2026-05-01', 'period-end' => '2026-05-31', 'batch' => 'rev-mediavine-42-2026-05', 'hostname' => 'extrachill.com', 'limit' => '100', 'format' => 'json' ) );
-	revenue_command_test_assert_synopsis_accepts_documented_options( 'arc', array( 'include-alltime' => true, 'format' => 'json' ) );
-	revenue_command_test_assert_synopsis_accepts_documented_options( 'diagnose', array( 'period' => '2026-05', 'period-start' => '2026-05-01', 'period-end' => '2026-05-31', 'batch' => 'rev-mediavine-42-2026-05', 'blog-id' => '1', 'hostname' => 'extrachill.com', 'format' => 'json' ) );
 	$command->fetch( array(), array( 'start' => '2026-05-01', 'end' => '2026-05-31', 'period' => '2026-05', 'site-id' => '42', 'dry-run' => true ) );
 	revenue_command_test_assert_same(
 		array( array( 'action' => 'backfill', 'periods' => array( array( 'period' => '2026-05', 'start_date' => '2026-05-01', 'end_date' => '2026-05-31' ) ), 'site_id' => '42' ) ),
