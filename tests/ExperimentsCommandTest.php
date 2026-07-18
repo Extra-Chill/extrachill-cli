@@ -62,6 +62,8 @@ namespace {
 	$experiments_command_test_definitions = array(
 		array(
 			'key'                  => 'copy-test',
+			'registered'           => true,
+			'orphaned'             => false,
 			'definition_version'   => 3,
 			'assignment_policy'    => 'weighted_random',
 			'default_state'        => 'inactive',
@@ -74,6 +76,8 @@ namespace {
 		),
 		array(
 			'key'                  => 'version-test',
+			'registered'           => true,
+			'orphaned'             => false,
 			'definition_version'   => 2,
 			'assignment_policy'    => 'weighted_random',
 			'default_state'        => 'active',
@@ -82,6 +86,19 @@ namespace {
 			'control_variant'      => 'control',
 			'variants'             => array( 'control' => 50, 'treatment' => 50 ),
 			'surfaces'             => array( 'link-page' ),
+		),
+		array(
+			'key'                  => 'removed-test',
+			'registered'           => false,
+			'orphaned'             => true,
+			'definition_version'   => 1,
+			'assignment_policy'    => '',
+			'default_state'        => 'inactive',
+			'state'                => 'paused',
+			'default_variant'      => '',
+			'control_variant'      => '',
+			'variants'             => array(),
+			'surfaces'             => array(),
 		),
 	);
 
@@ -196,6 +213,14 @@ namespace {
 		),
 		'version_diagnostics' => array( 'observed_event_rows_by_version' => array( 1 => 8, 3 => 18 ), 'mixed_versions_observed' => true, 'requested_version' => null, 'surfaces' => array( 'hero', 'footer' ), 'assignment_policies' => array( 'weighted_random' ) ),
 		'coverage'            => array( 'loaded_rows' => 26, 'truncated' => false, 'no_data_semantics' => 'Null is not zero.' ),
+		'contract'            => array(
+			'assignment' => 'The first valid assignment fixes a person variant and version.',
+			'exposure'   => 'Exposure is never inferred. Exposure-conditioned outcomes are descriptive and may be selection-biased.',
+			'outcomes'   => 'Each requested canonical outcome counts once per person and lens.',
+			'statistics' => 'Nulls carry explicit status. No winner is selected.',
+		),
+		'window'              => array( 'since' => '2026-06-20 00:00:00', 'as_of' => '2026-07-18 00:00:00', 'days' => 28, 'attribution_window_days' => 28, 'session_gap_mins' => 30 ),
+		'query'               => array( 'event_types' => array( 'experiment_assignment', 'experiment_exposure' ), 'page_size' => 500, 'max_events' => 50000, 'bounded_state' => 'Variants and outcomes are bounded by the owner.' ),
 		'future_report'       => array( 'sample_size' => 14, 'ratio' => 0.625, 'available' => false ),
 	);
 	$report_ability = new ExperimentsCommandTestAbility(
@@ -224,6 +249,9 @@ namespace {
 	experiments_command_test_reset_output();
 	$command->get( array( 'copy-test' ), array( 'format' => 'json' ) );
 	experiments_command_test_assert_same( $experiments_command_test_definitions[0], WP_CLI::$printed[0]['value'], 'Get JSON must preserve one complete definition.' );
+	experiments_command_test_reset_output();
+	$command->get( array( 'removed-test' ), array( 'format' => 'json' ) );
+	experiments_command_test_assert_same( $experiments_command_test_definitions[2], WP_CLI::$printed[0]['value'], 'Get JSON must permit inspection of a complete orphan owner row.' );
 
 	// Inactive human output explicitly reports effective no-op behavior.
 	experiments_command_test_reset_output();
@@ -234,6 +262,31 @@ namespace {
 	experiments_command_test_assert_contains( 'no-op; normal consumer behavior remains unchanged', $human, 'Inactive definitions must be labeled no-op.' );
 	experiments_command_test_assert_contains( 'control=40, challenger-a=35, challenger-b=25', $human, 'Human definition output must separate weights.' );
 	experiments_command_test_assert_contains( 'Surfaces: hero, footer', $human, 'Human definition output must separate surfaces.' );
+	experiments_command_test_reset_output();
+	$command->get( array( 'removed-test' ), array() );
+	$orphan_human = implode( "\n", WP_CLI::$messages );
+	experiments_command_test_assert_contains( 'orphaned lifecycle record (not registered; inspection only)', $orphan_human, 'Human get must label owner-reported orphan rows explicitly.' );
+	experiments_command_test_assert_contains( 'no-op; normal consumer behavior remains unchanged', $orphan_human, 'Orphan lifecycle rows must be labeled no-op even when stored state is active-like.' );
+
+	// Orphan state/report fail before confirmation or downstream Ability execution.
+	$transition_calls_before_orphan = count( $transition_ability->inputs );
+	$report_calls_before_orphan     = count( $report_ability->inputs );
+	experiments_command_test_reset_output();
+	try {
+		$command->state( array( 'removed-test', 'active' ), array() );
+		throw new \RuntimeException( 'Orphan state did not terminate.' );
+	} catch ( ExperimentsCommandTestError $error ) {
+		experiments_command_test_assert_contains( 'orphaned lifecycle record without a registered code definition', $error->getMessage(), 'Orphan state must explain the owner state honestly.' );
+	}
+	experiments_command_test_assert_same( 0, count( WP_CLI::$confirmations ), 'Orphan state must fail before confirmation.' );
+	experiments_command_test_assert_same( $transition_calls_before_orphan, count( $transition_ability->inputs ), 'Orphan state must fail before transition Ability execution.' );
+	try {
+		$command->report( array( 'removed-test' ), array() );
+		throw new \RuntimeException( 'Orphan report did not terminate.' );
+	} catch ( ExperimentsCommandTestError $error ) {
+		experiments_command_test_assert_contains( 'orphaned lifecycle record without a registered code definition', $error->getMessage(), 'Orphan report must explain the owner state honestly.' );
+	}
+	experiments_command_test_assert_same( $report_calls_before_orphan, count( $report_ability->inputs ), 'Orphan report must fail before Analytics Ability execution.' );
 
 	// Active and completed transitions confirm, map exact owner arguments, and retain before/after envelopes.
 	experiments_command_test_reset_output();
@@ -274,12 +327,12 @@ namespace {
 			'experiment_key'          => 'copy-test',
 			'control_variant'         => 'control',
 			'variants'                => array( 'control', 'challenger-a', 'challenger-b' ),
+			'definition_version'      => 2,
 			'outcome_event_types'     => array( 'newsletter_signup', 'bridge_click' ),
 			'days'                    => 90,
 			'attribution_window_days' => 45,
 			'session_gap_mins'        => 120,
 			'max_events'              => 100000,
-			'definition_version'      => 2,
 		),
 		$report_ability->inputs[0],
 		'Report must map every bounded Analytics field exactly.'
@@ -293,17 +346,12 @@ namespace {
 	$command->report( array( 'copy-test' ), array( 'format' => 'csv' ) );
 	experiments_command_test_assert_same(
 		array(
-			'experiment_key'          => 'copy-test',
-			'control_variant'         => 'control',
-			'variants'                => array( 'control', 'challenger-a', 'challenger-b' ),
-			'outcome_event_types'     => array(),
-			'days'                    => 28,
-			'attribution_window_days' => 28,
-			'session_gap_mins'        => 30,
-			'max_events'              => 50000,
+			'experiment_key'  => 'copy-test',
+			'control_variant' => 'control',
+			'variants'        => array( 'control', 'challenger-a', 'challenger-b' ),
 		),
 		$report_ability->inputs[1],
-		'Report defaults must derive only required definition dimensions and exact owner defaults.'
+		'Report must omit every unspecified optional field so Analytics owns defaults.'
 	);
 	$report_csv = $experiments_command_test_formats[0];
 	experiments_command_test_assert_same( array_keys( $report_result ), $report_csv['fields'], 'Report CSV must retain every owner field.' );
@@ -320,7 +368,30 @@ namespace {
 	experiments_command_test_assert_contains( 'unavailable / insufficient data', $human, 'Human report must preserve insufficient-data states.' );
 	experiments_command_test_assert_contains( 'Version/surface/policy diagnostics', $human, 'Human report must show mixed-version and surface diagnostics.' );
 	experiments_command_test_assert_contains( 'Coverage and insufficient-data diagnostics', $human, 'Human report must separate coverage.' );
+	experiments_command_test_assert_contains( 'Analytics owner contract and interpretation', $human, 'Human report must label the Analytics owner contract.' );
+	experiments_command_test_assert_contains( 'Analytics owner window', $human, 'Human report must render the owner window.' );
+	experiments_command_test_assert_contains( 'Analytics owner query and bounds', $human, 'Human report must render owner query bounds.' );
 	experiments_command_test_assert_contains( 'No winner is declared', $human, 'Human report must expressly avoid winner selection.' );
+	$contract_table = null;
+	$window_table   = null;
+	$query_table    = null;
+	foreach ( $experiments_command_test_formats as $table ) {
+		foreach ( $table['items'] as $row ) {
+			if ( 'exposure' === ( $row['metric'] ?? '' ) ) {
+				$contract_table = $table;
+			}
+			if ( 'since' === ( $row['metric'] ?? '' ) ) {
+				$window_table = $table;
+			}
+			if ( 'bounded_state' === ( $row['metric'] ?? '' ) ) {
+				$query_table = $table;
+			}
+		}
+	}
+	experiments_command_test_assert_true( null !== $contract_table, 'Human output must table the Analytics owner contract.' );
+	experiments_command_test_assert_contains( 'selection-biased', wp_json_encode( $contract_table['items'] ), 'Human contract output must retain the exposure-selection-bias interpretation.' );
+	experiments_command_test_assert_true( null !== $window_table, 'Human output must table Analytics owner window fields.' );
+	experiments_command_test_assert_true( null !== $query_table, 'Human output must table Analytics owner query/bounds fields.' );
 
 	// Owner permission and transition errors pass through without replacement.
 	$experiments_command_test_abilities['extrachill/list-experiments'] = new ExperimentsCommandTestAbility(

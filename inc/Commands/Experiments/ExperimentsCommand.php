@@ -37,6 +37,13 @@ class ExperimentsCommand {
 	 *
 	 *     wp extrachill experiments list
 	 *     wp extrachill experiments list --format=json
+	 *     wp --allow-root --path=/var/www/extrachill.com extrachill experiments list
+	 *
+	 * ## NOTES
+	 *
+	 * Network permits trusted local WP-CLI execution of its private experiment
+	 * admin Abilities. Use the standard local command above without `--user`;
+	 * web and REST callers still require Network's administrative capability.
 	 *
 	 * @subcommand list
 	 * @when after_wp_load
@@ -146,6 +153,7 @@ class ExperimentsCommand {
 		$key    = (string) ( $args[0] ?? '' );
 		$state  = (string) ( $args[1] ?? '' );
 		$before = $this->definition( $key );
+		$this->require_registered( $before, 'transition state' );
 
 		if ( in_array( $state, array( 'active', 'completed' ), true ) ) {
 			WP_CLI::confirm( sprintf( 'Transition experiment %s to %s?', $key, $state ), $assoc_args );
@@ -202,28 +210,16 @@ class ExperimentsCommand {
 	 * : Comma-separated canonical Analytics outcome event types.
 	 *
 	 * [--days=<days>]
-	 * : UTC lookback days. Accepted range: 1-90.
-	 * ---
-	 * default: 28
-	 * ---
+	 * : UTC lookback days. Accepted range: 1-90. Omit to use the Analytics owner default.
 	 *
 	 * [--attribution-window-days=<days>]
-	 * : Outcome attribution window. Accepted range: 1-90.
-	 * ---
-	 * default: 28
-	 * ---
+	 * : Outcome attribution window. Accepted range: 1-90. Omit to use the Analytics owner default.
 	 *
 	 * [--session-gap-mins=<mins>]
-	 * : Inactivity gap separating sessions. Accepted range: 1-120.
-	 * ---
-	 * default: 30
-	 * ---
+	 * : Inactivity gap separating sessions. Accepted range: 1-120. Omit to use the Analytics owner default.
 	 *
 	 * [--max-events=<count>]
-	 * : Maximum retained rows. Accepted range: 100-100000.
-	 * ---
-	 * default: 50000
-	 * ---
+	 * : Maximum retained rows. Accepted range: 100-100000. Omit to use the Analytics owner default.
 	 *
 	 * [--format=<format>]
 	 * : Output format. JSON and CSV preserve the complete Analytics owner envelope.
@@ -244,18 +240,27 @@ class ExperimentsCommand {
 	 */
 	public function report( $args, $assoc_args ) {
 		$definition = $this->definition( $args[0] ?? '' );
+		$this->require_registered( $definition, 'report' );
 		$input      = array(
-			'experiment_key'          => (string) $definition['key'],
-			'control_variant'         => (string) ( $assoc_args['control-variant'] ?? $definition['control_variant'] ),
-			'variants'                => isset( $assoc_args['variants'] ) ? $this->csv_values( $assoc_args['variants'] ) : array_keys( (array) $definition['variants'] ),
-			'outcome_event_types'     => isset( $assoc_args['outcome-event-types'] ) ? $this->csv_values( $assoc_args['outcome-event-types'] ) : array(),
-			'days'                    => (int) ( $assoc_args['days'] ?? 28 ),
-			'attribution_window_days' => (int) ( $assoc_args['attribution-window-days'] ?? 28 ),
-			'session_gap_mins'        => (int) ( $assoc_args['session-gap-mins'] ?? 30 ),
-			'max_events'              => (int) ( $assoc_args['max-events'] ?? 50000 ),
+			'experiment_key'  => (string) $definition['key'],
+			'control_variant' => (string) ( $assoc_args['control-variant'] ?? $definition['control_variant'] ),
+			'variants'        => isset( $assoc_args['variants'] ) ? $this->csv_values( $assoc_args['variants'] ) : array_keys( (array) $definition['variants'] ),
 		);
-		if ( isset( $assoc_args['definition-version'] ) ) {
-			$input['definition_version'] = (int) $assoc_args['definition-version'];
+		$optional = array(
+			'definition-version'      => 'definition_version',
+			'outcome-event-types'     => 'outcome_event_types',
+			'days'                    => 'days',
+			'attribution-window-days' => 'attribution_window_days',
+			'session-gap-mins'        => 'session_gap_mins',
+			'max-events'              => 'max_events',
+		);
+		foreach ( $optional as $cli_key => $ability_key ) {
+			if ( ! isset( $assoc_args[ $cli_key ] ) ) {
+				continue;
+			}
+			$input[ $ability_key ] = 'outcome-event-types' === $cli_key
+				? $this->csv_values( $assoc_args[ $cli_key ] )
+				: (int) $assoc_args[ $cli_key ];
 		}
 
 		$result = $this->execute( 'extrachill/get-experiment-summary', $input, 'Extra Chill Analytics' );
@@ -295,15 +300,31 @@ class ExperimentsCommand {
 		WP_CLI::error( sprintf( 'Experiment %s is not registered.', (string) $key ) );
 	}
 
+	/** Reject owner-reported orphan rows before mutation or analytics calls. */
+	private function require_registered( array $definition, $operation ) {
+		if ( ! empty( $definition['registered'] ) && empty( $definition['orphaned'] ) ) {
+			return;
+		}
+		WP_CLI::error(
+			sprintf(
+				'Experiment %s is an orphaned lifecycle record without a registered code definition; cannot %s.',
+				(string) ( $definition['key'] ?? '' ),
+				$operation
+			)
+		);
+	}
+
 	/** Render one Network definition without changing its values. */
 	private function display_definition( array $definition ) {
-		$state = $definition['state'] ?? null;
+		$state      = $definition['state'] ?? null;
+		$registered = ! empty( $definition['registered'] ) && empty( $definition['orphaned'] );
 		WP_CLI::log( sprintf( 'Experiment: %s', $this->human_value( $definition['key'] ?? null ) ) );
+		WP_CLI::log( sprintf( 'Registry status: %s', $registered ? 'registered code definition' : 'orphaned lifecycle record (not registered; inspection only)' ) );
 		WP_CLI::log( sprintf( 'Definition version: %s', $this->human_value( $definition['definition_version'] ?? null ) ) );
 		WP_CLI::log( sprintf( 'Assignment policy: %s', $this->human_value( $definition['assignment_policy'] ?? null ) ) );
 		WP_CLI::log( sprintf( 'Code default state: %s', $this->human_value( $definition['default_state'] ?? null ) ) );
 		WP_CLI::log( sprintf( 'Effective/live state: %s', $this->human_value( $state ) ) );
-		WP_CLI::log( sprintf( 'Runtime status: %s', 'active' === $state ? 'assignment eligible when the consumer permits it' : 'no-op; normal consumer behavior remains unchanged' ) );
+		WP_CLI::log( sprintf( 'Runtime status: %s', $registered && 'active' === $state ? 'assignment eligible when the consumer permits it' : 'no-op; normal consumer behavior remains unchanged' ) );
 		WP_CLI::log( sprintf( 'Default/control variant: %s / %s', $this->human_value( $definition['default_variant'] ?? null ), $this->human_value( $definition['control_variant'] ?? null ) ) );
 		WP_CLI::log( 'Variant weights: ' . $this->pairs( (array) ( $definition['variants'] ?? array() ) ) );
 		WP_CLI::log( 'Surfaces: ' . $this->values( (array) ( $definition['surfaces'] ?? array() ) ) );
@@ -333,6 +354,9 @@ class ExperimentsCommand {
 		WP_CLI::log( '' );
 		$this->display_metric_group( 'Version/surface/policy diagnostics', (array) ( $result['version_diagnostics'] ?? array() ) );
 		$this->display_metric_group( 'Coverage and insufficient-data diagnostics', (array) ( $result['coverage'] ?? array() ) );
+		$this->display_metric_group( 'Analytics owner contract and interpretation', (array) ( $result['contract'] ?? array() ) );
+		$this->display_metric_group( 'Analytics owner window', (array) ( $result['window'] ?? array() ) );
+		$this->display_metric_group( 'Analytics owner query and bounds', (array) ( $result['query'] ?? array() ) );
 		WP_CLI::log( 'No winner is declared; null and unknown values remain unavailable rather than zero.' );
 	}
 
