@@ -158,6 +158,7 @@ class ConcertTrackingCommand {
 		$event_id = (int) $args[0];
 		$user     = $this->resolve_user( $assoc_args );
 		$format   = $assoc_args['format'] ?? 'table';
+		$this->validate_event( $event_id );
 		$this->ensure_cli_actor();
 
 		$ability = wp_get_ability( 'extrachill/get-event-attendance' );
@@ -575,8 +576,8 @@ class ConcertTrackingCommand {
 		$invalid = 0;
 
 		foreach ( $event_ids as $event_id ) {
-			$post = get_post( $event_id );
-			if ( ! $post || 'data_machine_events' !== $post->post_type ) {
+			$post = $this->validate_event( $event_id, false );
+			if ( ! $post ) {
 				WP_CLI::warning( sprintf( 'Event %d: not found or wrong post type. Skipping.', $event_id ) );
 				++$invalid;
 				continue;
@@ -589,9 +590,13 @@ class ConcertTrackingCommand {
 				) );
 
 				if ( is_wp_error( $check ) ) {
-					WP_CLI::warning( sprintf( 'Event %d: %s', $event_id, $check->get_error_message() ) );
-					++$invalid;
-					continue;
+					if ( $this->is_row_event_error( $check ) ) {
+						WP_CLI::warning( sprintf( 'Event %d: %s', $event_id, $check->get_error_message() ) );
+						++$invalid;
+						continue;
+					}
+
+					WP_CLI::error( sprintf( 'Event %d: %s', $event_id, $check->get_error_message() ) );
 				}
 
 				if ( ! empty( $check['user_marked'] ) ) {
@@ -611,9 +616,13 @@ class ConcertTrackingCommand {
 				) );
 
 				if ( is_wp_error( $result ) ) {
-					WP_CLI::warning( sprintf( 'Event %d: %s', $event_id, $result->get_error_message() ) );
-					++$invalid;
-					continue;
+					if ( $this->is_row_event_error( $result ) ) {
+						WP_CLI::warning( sprintf( 'Event %d: %s', $event_id, $result->get_error_message() ) );
+						++$invalid;
+						continue;
+					}
+
+					WP_CLI::error( sprintf( 'Event %d: %s', $event_id, $result->get_error_message() ) );
 				}
 
 				if ( empty( $result['changed'] ) ) {
@@ -637,11 +646,40 @@ class ConcertTrackingCommand {
 		return function_exists( 'ec_get_blog_id' ) ? ec_get_blog_id( 'events' ) : 7;
 	}
 
-	private function validate_event( $event_id ) {
-		$post = get_post( $event_id );
-		if ( ! $post ) {
-			WP_CLI::error( sprintf( 'Event %d not found.', $event_id ) );
+	private function validate_event( $event_id, $fatal = true ) {
+		$events_blog_id = $this->get_events_blog_id();
+		$switched       = get_current_blog_id() !== $events_blog_id;
+
+		if ( $events_blog_id <= 0 || ( $switched && ! switch_to_blog( $events_blog_id ) ) ) {
+			if ( $fatal ) {
+				WP_CLI::error( 'The canonical Events site is unavailable.' );
+			}
+			return null;
 		}
+
+		try {
+			$post = get_post( $event_id );
+			if ( ! $post || 'data_machine_events' !== $post->post_type || 'publish' !== $post->post_status ) {
+				if ( $fatal ) {
+					WP_CLI::error( sprintf( 'Published event %d not found on the canonical Events site.', $event_id ) );
+				}
+				return null;
+			}
+
+			return $post;
+		} finally {
+			if ( $switched ) {
+				restore_current_blog();
+			}
+		}
+	}
+
+	private function is_row_event_error( $error ) {
+		return in_array(
+			$error->get_error_code(),
+			array( 'event_not_found', 'invalid_event_post_type', 'event_not_published' ),
+			true
+		);
 	}
 
 	private function timing_label( $timing ) {
