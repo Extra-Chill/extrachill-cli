@@ -50,7 +50,7 @@ class ConcertTrackingCommand {
 		$event_id = (int) $args[0];
 		$user     = $this->resolve_user( $assoc_args );
 
-		$this->validate_event( $event_id );
+		$this->require_event( $event_id );
 		$this->ensure_cli_actor();
 
 		$ability = wp_get_ability( 'extrachill/set-event-mark' );
@@ -102,7 +102,7 @@ class ConcertTrackingCommand {
 		$event_id = (int) $args[0];
 		$user     = $this->resolve_user( $assoc_args );
 
-		$this->validate_event( $event_id );
+		$this->require_event( $event_id );
 		$this->ensure_cli_actor();
 
 		$ability = wp_get_ability( 'extrachill/set-event-mark' );
@@ -158,7 +158,7 @@ class ConcertTrackingCommand {
 		$event_id = (int) $args[0];
 		$user     = $this->resolve_user( $assoc_args );
 		$format   = $assoc_args['format'] ?? 'table';
-		$this->validate_event( $event_id );
+		$this->require_event( $event_id );
 		$this->ensure_cli_actor();
 
 		$ability = wp_get_ability( 'extrachill/get-event-attendance' );
@@ -466,7 +466,7 @@ class ConcertTrackingCommand {
 		$event_id = (int) $args[0];
 		$format   = $assoc_args['format'] ?? 'table';
 
-		$this->validate_event( $event_id );
+		$this->require_event( $event_id );
 
 		$ability = wp_get_ability( 'extrachill/get-event-attendance' );
 		if ( ! $ability ) {
@@ -576,11 +576,15 @@ class ConcertTrackingCommand {
 		$invalid = 0;
 
 		foreach ( $event_ids as $event_id ) {
-			$post = $this->validate_event( $event_id, false );
-			if ( ! $post ) {
-				WP_CLI::warning( sprintf( 'Event %d: not found or wrong post type. Skipping.', $event_id ) );
-				++$invalid;
-				continue;
+			$post = $this->validate_event( $event_id );
+			if ( is_wp_error( $post ) ) {
+				if ( $this->is_row_event_error( $post ) ) {
+					WP_CLI::warning( sprintf( 'Event %d: %s Skipping.', $event_id, $post->get_error_message() ) );
+					++$invalid;
+					continue;
+				}
+
+				WP_CLI::error( sprintf( 'Event %d: %s', $event_id, $post->get_error_message() ) );
 			}
 
 			if ( $dry_run ) {
@@ -646,24 +650,26 @@ class ConcertTrackingCommand {
 		return function_exists( 'ec_get_blog_id' ) ? ec_get_blog_id( 'events' ) : 7;
 	}
 
-	private function validate_event( $event_id, $fatal = true ) {
+	private function validate_event( $event_id ) {
 		$events_blog_id = $this->get_events_blog_id();
 		$switched       = get_current_blog_id() !== $events_blog_id;
 
 		if ( $events_blog_id <= 0 || ( $switched && ! switch_to_blog( $events_blog_id ) ) ) {
-			if ( $fatal ) {
-				WP_CLI::error( 'The canonical Events site is unavailable.' );
-			}
-			return null;
+			return new \WP_Error( 'events_site_unavailable', 'The canonical Events site is unavailable.' );
 		}
 
 		try {
 			$post = get_post( $event_id );
-			if ( ! $post || 'data_machine_events' !== $post->post_type || 'publish' !== $post->post_status ) {
-				if ( $fatal ) {
-					WP_CLI::error( sprintf( 'Published event %d not found on the canonical Events site.', $event_id ) );
-				}
-				return null;
+			if ( ! $post ) {
+				return new \WP_Error( 'event_not_found', 'The requested event does not exist on the canonical Events site.' );
+			}
+
+			if ( 'data_machine_events' !== $post->post_type ) {
+				return new \WP_Error( 'invalid_event_post_type', 'The requested post is not an event.' );
+			}
+
+			if ( 'publish' !== $post->post_status ) {
+				return new \WP_Error( 'event_not_published', 'Attendance can only be recorded for published events.' );
 			}
 
 			return $post;
@@ -672,6 +678,15 @@ class ConcertTrackingCommand {
 				restore_current_blog();
 			}
 		}
+	}
+
+	private function require_event( $event_id ) {
+		$event = $this->validate_event( $event_id );
+		if ( is_wp_error( $event ) ) {
+			WP_CLI::error( $event->get_error_message() );
+		}
+
+		return $event;
 	}
 
 	private function is_row_event_error( $error ) {
