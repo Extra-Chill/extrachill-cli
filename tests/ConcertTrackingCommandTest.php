@@ -75,6 +75,7 @@ namespace {
 			11 => array( 'ID' => 11, 'post_type' => 'data_machine_events', 'post_status' => 'publish', 'post_title' => 'Second Show' ),
 		),
 	);
+	$concert_tracking_sites           = array( 1, 7 );
 	$concert_tracking_current_user_id = 0;
 	$concert_tracking_current_blog_id = 1;
 	$concert_tracking_events_blog_id  = 7;
@@ -121,13 +122,15 @@ namespace {
 	}
 
 	function switch_to_blog( $blog_id ) {
-		global $concert_tracking_blog_stack, $concert_tracking_current_blog_id, $concert_tracking_posts;
-		if ( ! isset( $concert_tracking_posts[ $blog_id ] ) ) {
-			return false;
-		}
+		global $concert_tracking_blog_stack, $concert_tracking_current_blog_id;
 		$concert_tracking_blog_stack[] = $concert_tracking_current_blog_id;
 		$concert_tracking_current_blog_id = (int) $blog_id;
 		return true;
+	}
+
+	function get_site( $blog_id ) {
+		global $concert_tracking_sites;
+		return in_array( (int) $blog_id, $concert_tracking_sites, true ) ? (object) array( 'blog_id' => (int) $blog_id ) : null;
 	}
 
 	function restore_current_blog() {
@@ -288,6 +291,11 @@ namespace {
 	concert_tracking_assert_same( 1, $concert_tracking_current_blog_id, 'Skipped row validation must restore the invocation context.' );
 
 	// Canonical site resolution failures are fatal for direct commands and imports.
+	concert_tracking_assert_same( true, switch_to_blog( 99 ), 'The test double must match WordPress core behavior for nonexistent site IDs.' );
+	concert_tracking_assert_same( 99, $concert_tracking_current_blog_id, 'Core switch behavior must not validate site existence.' );
+	restore_current_blog();
+	concert_tracking_assert_same( 1, $concert_tracking_current_blog_id, 'The core-behavior probe must restore invocation context.' );
+
 	$concert_tracking_events_blog_id = 99;
 	try {
 		$command->check( array( 10 ), array( 'user' => 'chubes' ) );

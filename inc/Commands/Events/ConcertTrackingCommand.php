@@ -652,9 +652,13 @@ class ConcertTrackingCommand {
 
 	private function validate_event( $event_id ) {
 		$events_blog_id = $this->get_events_blog_id();
-		$switched       = get_current_blog_id() !== $events_blog_id;
 
-		if ( $events_blog_id <= 0 || ( $switched && ! switch_to_blog( $events_blog_id ) ) ) {
+		if ( $events_blog_id <= 0 || ! get_site( $events_blog_id ) ) {
+			return new \WP_Error( 'events_site_unavailable', 'The canonical Events site is unavailable.' );
+		}
+
+		$switched = get_current_blog_id() !== $events_blog_id;
+		if ( $switched && ! switch_to_blog( $events_blog_id ) ) {
 			return new \WP_Error( 'events_site_unavailable', 'The canonical Events site is unavailable.' );
 		}
 
