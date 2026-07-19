@@ -51,16 +51,17 @@ class ConcertTrackingCommand {
 		$user     = $this->resolve_user( $assoc_args );
 
 		$this->validate_event( $event_id );
+		$this->ensure_cli_actor();
 
-		$ability = wp_get_ability( 'extrachill/toggle-event-mark' );
+		$ability = wp_get_ability( 'extrachill/set-event-mark' );
 		if ( ! $ability ) {
-			WP_CLI::error( 'extrachill/toggle-event-mark ability not available. Is extrachill-users active?' );
+			WP_CLI::error( 'extrachill/set-event-mark ability not available. Is extrachill-users up to date?' );
 		}
 
 		$result = $ability->execute( array(
 			'user_id'  => (int) $user->ID,
 			'event_id' => $event_id,
-			'action'   => 'mark',
+			'marked'   => true,
 		) );
 
 		if ( is_wp_error( $result ) ) {
@@ -101,15 +102,18 @@ class ConcertTrackingCommand {
 		$event_id = (int) $args[0];
 		$user     = $this->resolve_user( $assoc_args );
 
-		$ability = wp_get_ability( 'extrachill/toggle-event-mark' );
+		$this->validate_event( $event_id );
+		$this->ensure_cli_actor();
+
+		$ability = wp_get_ability( 'extrachill/set-event-mark' );
 		if ( ! $ability ) {
-			WP_CLI::error( 'extrachill/toggle-event-mark ability not available. Is extrachill-users active?' );
+			WP_CLI::error( 'extrachill/set-event-mark ability not available. Is extrachill-users up to date?' );
 		}
 
 		$result = $ability->execute( array(
 			'user_id'  => (int) $user->ID,
 			'event_id' => $event_id,
-			'action'   => 'unmark',
+			'marked'   => false,
 		) );
 
 		if ( is_wp_error( $result ) ) {
@@ -154,6 +158,7 @@ class ConcertTrackingCommand {
 		$event_id = (int) $args[0];
 		$user     = $this->resolve_user( $assoc_args );
 		$format   = $assoc_args['format'] ?? 'table';
+		$this->ensure_cli_actor();
 
 		$ability = wp_get_ability( 'extrachill/get-event-attendance' );
 		if ( ! $ability ) {
@@ -172,7 +177,7 @@ class ConcertTrackingCommand {
 		$data = array(
 			'event_id' => $event_id,
 			'user'     => $user->user_login,
-			'marked'   => $result['marked'] ?? false,
+			'marked'   => $result['user_marked'] ?? false,
 			'timing'   => $result['timing'] ?? '',
 			'label'    => $this->timing_label( $result['timing'] ?? '' ),
 			'count'    => $result['count'] ?? 0,
@@ -472,7 +477,7 @@ class ConcertTrackingCommand {
 		$include_attendees = isset( $assoc_args['attendees'] );
 		if ( $include_attendees ) {
 			$input['include_attendees'] = true;
-			$input['attendee_limit']    = isset( $assoc_args['limit'] ) ? (int) $assoc_args['limit'] : 20;
+			$input['limit']             = isset( $assoc_args['limit'] ) ? (int) $assoc_args['limit'] : 20;
 		}
 
 		$result = $ability->execute( $input );
@@ -483,7 +488,6 @@ class ConcertTrackingCommand {
 
 		$data = array(
 			'event_id' => $event_id,
-			'title'    => $result['title'] ?? '(unknown)',
 			'timing'   => $result['timing'] ?? '',
 			'label'    => $this->timing_label( $result['timing'] ?? '' ),
 			'count'    => $result['count'] ?? 0,
@@ -502,8 +506,8 @@ class ConcertTrackingCommand {
 
 		$rows = array(
 			array(
-				'Field' => 'Event',
-				'Value' => $data['title'],
+				'Field' => 'Event ID',
+				'Value' => $data['event_id'],
 			),
 			array(
 				'Field' => 'Timing',
@@ -528,8 +532,8 @@ class ConcertTrackingCommand {
 	 * Bulk import event marks for a user (backfill concert history).
 	 *
 	 * Composite CLI-only utility — no single ability covers the full
-	 * import loop (validation, dedup, dry-run). Each mark invokes the
-	 * extrachill/toggle-event-mark ability individually.
+	 * import loop (validation, dedup, dry-run). Reads use the canonical
+	 * attendance ability and writes use the idempotent set-mark ability.
 	 *
 	 * ## OPTIONS
 	 *
@@ -550,9 +554,10 @@ class ConcertTrackingCommand {
 	 * @when after_wp_load
 	 */
 	public function import( $args, $assoc_args ) {
-		$ability = wp_get_ability( 'extrachill/toggle-event-mark' );
-		if ( ! $ability ) {
-			WP_CLI::error( 'extrachill/toggle-event-mark ability not available. Is extrachill-users active?' );
+		$set_ability   = wp_get_ability( 'extrachill/set-event-mark' );
+		$check_ability = wp_get_ability( 'extrachill/get-event-attendance' );
+		if ( ! $set_ability || ! $check_ability ) {
+			WP_CLI::error( 'Canonical concert tracking abilities are not available. Is extrachill-users up to date?' );
 		}
 
 		$user      = $this->resolve_user_by_identifier( $args[0] ?? '' );
@@ -562,6 +567,8 @@ class ConcertTrackingCommand {
 		if ( empty( $event_ids ) ) {
 			WP_CLI::error( 'No event IDs provided.' );
 		}
+
+		$this->ensure_cli_actor();
 
 		$marked  = 0;
 		$skipped = 0;
@@ -576,11 +583,9 @@ class ConcertTrackingCommand {
 			}
 
 			if ( $dry_run ) {
-				// Dry-run: use the ability with action=check to see current state.
-				$check = $ability->execute( array(
+				$check = $check_ability->execute( array(
 					'user_id'  => (int) $user->ID,
 					'event_id' => $event_id,
-					'action'   => 'check',
 				) );
 
 				if ( is_wp_error( $check ) ) {
@@ -589,7 +594,7 @@ class ConcertTrackingCommand {
 					continue;
 				}
 
-				if ( ! empty( $check['marked'] ) ) {
+				if ( ! empty( $check['user_marked'] ) ) {
 					WP_CLI::log( sprintf( 'Event %d: already marked. Skipping.', $event_id ) );
 					++$skipped;
 					continue;
@@ -599,10 +604,10 @@ class ConcertTrackingCommand {
 				WP_CLI::log( sprintf( 'Event %d: would mark (%s — %s)', $event_id, $post->post_title, $timing ) );
 				++$marked;
 			} else {
-				$result = $ability->execute( array(
+				$result = $set_ability->execute( array(
 					'user_id'  => (int) $user->ID,
 					'event_id' => $event_id,
-					'action'   => 'mark',
+					'marked'   => true,
 				) );
 
 				if ( is_wp_error( $result ) ) {
@@ -687,5 +692,25 @@ class ConcertTrackingCommand {
 		}
 
 		return $user;
+	}
+
+	/**
+	 * Give ability permission checks a deterministic actor in bare WP-CLI runs.
+	 */
+	private function ensure_cli_actor() {
+		$current_user = wp_get_current_user();
+		if ( $current_user && $current_user->ID ) {
+			return;
+		}
+
+		$administrator = get_user_by( 'id', 1 );
+		if ( ! $administrator || ! $administrator->ID ) {
+			WP_CLI::error( 'No authenticated CLI user and no administrator account is available.' );
+		}
+
+		wp_set_current_user( (int) $administrator->ID );
+		if ( ! current_user_can( 'manage_network_options' ) ) {
+			WP_CLI::error( 'The default CLI user is not authorized to manage concert attendance.' );
+		}
 	}
 }
