@@ -10,8 +10,8 @@ namespace WP_CLI\Utils {
 }
 
 namespace {
-	if ( class_exists( 'PHPUnit\\Framework\\TestCase' ) && class_exists( 'WP_CLI' ) ) {
-		class StorageMigrationCommandDiscoveryTest extends PHPUnit\Framework\TestCase {
+	if ( function_exists( 'wp_get_ability' ) ) {
+		class StorageMigrationCommandDiscoveryTest extends WP_UnitTestCase {
 			public function test_standalone_contract_is_wired_into_homeboy() {
 				$this->assertFileExists( dirname( __DIR__ ) . '/homeboy.json' );
 			}
@@ -71,20 +71,34 @@ namespace {
 	$GLOBALS['migration_cli_blog_id'] = 4;
 	$GLOBALS['migration_cli_sites'] = array( 4 => true, 13 => true );
 
-	function wp_get_ability( $name ) {
-		return 'extrachill/migrate-link-page-storage' === $name ? $GLOBALS['migration_cli_ability'] : null; }
-	function is_wp_error( $value ) {
-		return $value instanceof WP_Error; }
-	function wp_json_encode( $value, $flags = 0 ) {
-		return json_encode( $value, $flags ); }
-	function ec_get_blog_id( $key ) {
-		return array( 'artist' => 4, 'link_pages' => 13 )[ $key ] ?? 0; }
-	function get_current_blog_id() {
-		return $GLOBALS['migration_cli_blog_id']; }
-	function get_site( $blog_id ) {
-		return ! empty( $GLOBALS['migration_cli_sites'][ $blog_id ] ) ? (object) array( 'blog_id' => $blog_id ) : null; }
-	function ec_link_page_migration_participant_registry() {
-		return $GLOBALS['migration_cli_registry']; }
+	if ( ! function_exists( 'wp_get_ability' ) ) {
+		function wp_get_ability( $name ) {
+			return 'extrachill/migrate-link-page-storage' === $name ? $GLOBALS['migration_cli_ability'] : null; }
+	}
+	if ( ! function_exists( 'is_wp_error' ) ) {
+		function is_wp_error( $value ) {
+			return $value instanceof WP_Error; }
+	}
+	if ( ! function_exists( 'wp_json_encode' ) ) {
+		function wp_json_encode( $value, $flags = 0 ) {
+			return json_encode( $value, $flags ); }
+	}
+	if ( ! function_exists( 'ec_get_blog_id' ) ) {
+		function ec_get_blog_id( $key ) {
+			return array( 'artist' => 4, 'link_pages' => 13 )[ $key ] ?? 0; }
+	}
+	if ( ! function_exists( 'get_current_blog_id' ) ) {
+		function get_current_blog_id() {
+			return $GLOBALS['migration_cli_blog_id']; }
+	}
+	if ( ! function_exists( 'get_site' ) ) {
+		function get_site( $blog_id ) {
+			return ! empty( $GLOBALS['migration_cli_sites'][ $blog_id ] ) ? (object) array( 'blog_id' => $blog_id ) : null; }
+	}
+	if ( ! function_exists( 'ec_link_page_migration_participant_registry' ) ) {
+		function ec_link_page_migration_participant_registry() {
+			return $GLOBALS['migration_cli_registry']; }
+	}
 
 	function migration_cli_assert_same( $expected, $actual, $message ) {
 		if ( $expected !== $actual ) {
