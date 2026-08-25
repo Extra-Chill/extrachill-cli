@@ -2,12 +2,23 @@
 /** Executable tests for the Link Pages migration CLI adapter. */
 
 namespace WP_CLI\Utils {
-	function format_items( $format, $items, $fields ) {
-		$GLOBALS['migration_cli_formats'][] = compact( 'format', 'items', 'fields' );
+	if ( ! function_exists( __NAMESPACE__ . '\\format_items' ) ) {
+		function format_items( $format, $items, $fields ) {
+			$GLOBALS['migration_cli_formats'][] = compact( 'format', 'items', 'fields' );
+		}
 	}
 }
 
 namespace {
+	if ( class_exists( 'PHPUnit\\Framework\\TestCase' ) && class_exists( 'WP_CLI' ) ) {
+		class StorageMigrationCommandDiscoveryTest extends PHPUnit\Framework\TestCase {
+			public function test_standalone_contract_is_wired_into_homeboy() {
+				$this->assertFileExists( dirname( __DIR__ ) . '/homeboy.json' );
+			}
+		}
+		return;
+	}
+
 	define( 'ABSPATH', __DIR__ . '/' );
 
 	class MigrationCliError extends \RuntimeException {}
