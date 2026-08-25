@@ -62,6 +62,7 @@ namespace {
 			'mode'                => 'plan',
 			'source_blog_id'      => 4,
 			'destination_blog_id' => 13,
+			'required_participants' => array( 'analytics' ),
 		),
 		$GLOBALS['migration_cli_ability']->inputs[0],
 		'Plan must be the dry-run default and map only ability inputs.'
