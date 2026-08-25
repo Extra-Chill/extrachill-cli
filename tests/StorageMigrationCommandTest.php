@@ -81,6 +81,8 @@ namespace {
 	} catch ( MigrationCliError $error ) {
 		migration_cli_assert_same( '--apply requires --expect=<fingerprint> from a prior plan.', $error->getMessage(), 'Apply must require the plan fingerprint.' );
 	}
+	function get_current_blog_id() {
+		return 4; }
 
 	$GLOBALS['migration_cli_ability']->result = array(
 		'mode'   => 'validate',

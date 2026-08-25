@@ -42,10 +42,10 @@ class StorageMigrationCommand {
 	 *
 	 * ## EXAMPLES
 	 *
-	 *     wp extrachill link-pages migrate-storage --source=4 --destination=13
-	 *     wp extrachill link-pages migrate-storage --source=4 --destination=13 --apply --expect=<fingerprint>
-	 *     wp extrachill link-pages migrate-storage --validate=<journal-id> --format=json
-	 *     wp extrachill link-pages migrate-storage --rollback=<journal-id>
+	 *     wp --url=https://artist.extrachill.com --user=<network-admin> extrachill link-pages migrate-storage --source=4 --destination=13
+	 *     wp --url=https://artist.extrachill.com --user=<network-admin> extrachill link-pages migrate-storage --source=4 --destination=13 --apply --expect=<fingerprint>
+	 *     wp --url=https://artist.extrachill.com --user=<network-admin> extrachill link-pages migrate-storage --validate=<journal-id> --format=json
+	 *     wp --url=https://artist.extrachill.com --user=<network-admin> extrachill link-pages migrate-storage --rollback=<journal-id>
 	 *
 	 * @when after_wp_load
 	 *
@@ -85,6 +85,8 @@ class StorageMigrationCommand {
 				$destination = $this->resolve_blog_id( $assoc_args['destination'] );
 				if ( ! $source || ! $destination ) {
 					WP_CLI::error( 'Source and destination must resolve to existing positive blog IDs.' ); }
+				if ( get_current_blog_id() !== $source ) {
+					WP_CLI::error( sprintf( 'Run this command on source blog %d so all required owner participants are active. Use --url=<source-url> and --user=<network-admin>.', $source ) ); }
 				$input = array(
 					'mode'                => ! empty( $assoc_args['apply'] ) ? 'apply' : 'plan',
 					'source_blog_id'      => $source,
@@ -96,9 +98,22 @@ class StorageMigrationCommand {
 			$result = $ability->execute( $input );
 			if ( is_wp_error( $result ) ) {
 				$data    = $result->get_error_data();
-				$message = $result->get_error_message();
-				if ( is_array( $data ) && ! empty( $data['journal_id'] ) ) {
+				$code    = $result->get_error_code();
+				$message = '[' . $code . '] ' . $result->get_error_message();
+				if ( false !== stripos( $code, 'permission' ) || false !== stripos( $code, 'forbidden' ) ) {
+					$message .= ' Execute with global --user=<network-admin>; authorization is enforced by the ability.'; }
+				if ( is_array( $data ) && ! empty( $data['journal_id'] ) && in_array( $data['journal_status'] ?? '', array( 'applying', 'applied', 'failed', 'rolling_back' ), true ) ) {
 					$message .= ' Journal: ' . $data['journal_id'] . '. Roll back with: wp extrachill link-pages migrate-storage --rollback=' . $data['journal_id']; }
+				if ( 'json' === $format ) {
+					$message = wp_json_encode(
+						array(
+							'success' => false,
+							'code'    => $code,
+							'message' => $result->get_error_message(),
+							'data'    => $data,
+						),
+						JSON_UNESCAPED_SLASHES
+					); }
 				WP_CLI::error( $message );
 			}
 			if ( 'json' === $format ) {
