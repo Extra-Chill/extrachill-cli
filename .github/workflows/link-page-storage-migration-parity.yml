@@ -70,7 +70,6 @@ jobs:
           test $? -ne 0
           set -e
           jq -e '.code == "wrong_source_site"' artifacts/wrong-site.json
-          ./wp-cli.phar user create viewer viewer@example.test --role=subscriber --path=wordpress --url=artist.fixture.test
           set +e
           ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=13 --format=json --path=wordpress --url=artist.fixture.test --user=viewer > artifacts/permission.json
           test $? -ne 0
