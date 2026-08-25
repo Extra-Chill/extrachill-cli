@@ -206,6 +206,7 @@ namespace {
 	$GLOBALS['migration_cli_ability']->result = new WP_Error( 'rest_forbidden', 'Network permission required.', array( 'capability' => 'manage_network_options' ) );
 	$error = migration_cli_expect_json_error( $command, array(), array( 'source' => '4', 'destination' => '13' ), 'rest_forbidden' );
 	migration_cli_assert_same( 'manage_network_options', $error['data']['capability'], 'Permission error data was lost.' );
+	migration_cli_assert( false !== strpos( $error['message'], 'global --user=<network-admin>' ), 'JSON permission guidance was lost.' );
 
 	migration_cli_reset();
 	$GLOBALS['migration_cli_ability']->result = new WP_Error( 'migration_failed', 'Apply failed.', array( 'journal_id' => 'journal-2', 'journal_status' => 'failed', 'step' => 'copy' ) );

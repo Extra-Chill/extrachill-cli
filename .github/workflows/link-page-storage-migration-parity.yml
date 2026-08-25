@@ -74,7 +74,7 @@ jobs:
           ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=13 --format=json --path=wordpress --url=artist.fixture.test --user=viewer > artifacts/permission.json
           test $? -ne 0
           set -e
-          jq -e '.code and .data != null' artifacts/permission.json
+          jq -e '.code and has("data") and (.message | contains("global --user=<network-admin>"))' artifacts/permission.json
           set +e
           ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=13 --format=json --path=wordpress --url=artist.fixture.test --user=admin --skip-plugins=extrachill-link-pages > artifacts/missing-ability.json
           test $? -ne 0
