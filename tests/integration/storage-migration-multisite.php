@@ -103,6 +103,7 @@ function parity_seed() {
 		$viewer = wp_create_user( 'viewer', 'fixture-password', 'viewer@example.test' );
 	}
 	parity_assert( ! is_wp_error( $viewer ), 'Unprivileged operator creation failed.' );
+	add_user_to_blog( 4, $viewer, 'subscriber' );
 	$owner_users = array();
 	foreach ( array( 'owner-one', 'owner-two' ) as $login ) {
 		$user = username_exists( $login );
