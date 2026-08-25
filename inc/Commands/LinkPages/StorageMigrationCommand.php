@@ -91,6 +91,7 @@ class StorageMigrationCommand {
 					'mode'                => ! empty( $assoc_args['apply'] ) ? 'apply' : 'plan',
 					'source_blog_id'      => $source,
 					'destination_blog_id' => $destination,
+					'required_participants' => array( 'analytics' ),
 				);
 				if ( ! empty( $assoc_args['apply'] ) ) {
 					$input['expected_fingerprint'] = (string) $assoc_args['expect']; }
