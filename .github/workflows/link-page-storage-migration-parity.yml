@@ -1,0 +1,62 @@
+name: Link Page storage migration parity
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/link-page-storage-migration-parity.yml'
+      - 'tests/integration/**'
+      - 'inc/Commands/LinkPages/**'
+  workflow_dispatch:
+
+jobs:
+  multisite-mariadb:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: wordpress
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: cli }
+      - uses: actions/checkout@v4
+        with: { repository: Extra-Chill/extrachill-link-pages, ref: feat-11-storage-migration, path: link-pages }
+      - uses: actions/checkout@v4
+        with: { repository: Extra-Chill/extrachill-artist-platform, ref: feat-205-link-page-migration, path: artist }
+      - uses: actions/checkout@v4
+        with: { repository: Extra-Chill/extrachill-analytics, ref: feat-257-link-page-migration, path: analytics }
+      - uses: actions/checkout@v4
+        with: { repository: Extra-Chill/extrachill-network, path: network }
+      - uses: actions/checkout@v4
+        with: { repository: Extra-Chill/extrachill-users, path: users }
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: '8.2', extensions: mysqli }
+      - name: Install disposable WordPress multisite
+        run: |
+          curl -sSLo wp-cli.phar https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+          chmod +x wp-cli.phar
+          mkdir wordpress
+          ./wp-cli.phar core download --path=wordpress
+          ./wp-cli.phar config create --path=wordpress --dbname=wordpress --dbuser=root --dbpass=root --dbhost=127.0.0.1:3306 --extra-php <<'PHP'
+          define( 'WP_ALLOW_MULTISITE', true );
+          PHP
+          ./wp-cli.phar core install --path=wordpress --url=fixture.test --title=Fixture --admin_user=admin --admin_password=password --admin_email=admin@example.test
+          ./wp-cli.phar core multisite-convert --path=wordpress --title='Migration Proof Network' --base=/
+          mkdir -p wordpress/wp-content/plugins
+          ln -s "$GITHUB_WORKSPACE/link-pages" wordpress/wp-content/plugins/extrachill-link-pages
+          ln -s "$GITHUB_WORKSPACE/artist" wordpress/wp-content/plugins/extrachill-artist-platform
+          ln -s "$GITHUB_WORKSPACE/analytics" wordpress/wp-content/plugins/extrachill-analytics
+          ln -s "$GITHUB_WORKSPACE/cli" wordpress/wp-content/plugins/extrachill-cli
+          ln -s "$GITHUB_WORKSPACE/network" wordpress/wp-content/plugins/extrachill-network
+          ln -s "$GITHUB_WORKSPACE/users" wordpress/wp-content/plugins/extrachill-users
+      - name: Activate actual plugin composition
+        run: ./wp-cli.phar plugin activate extrachill-network extrachill-users extrachill-link-pages extrachill-artist-platform extrachill-analytics extrachill-cli --network --path=wordpress
+      - name: Seed and execute coordinated proof
+        run: |
+          ./wp-cli.phar eval-file "$GITHUB_WORKSPACE/cli/tests/integration/storage-migration-multisite.php" --path=wordpress --url=fixture.test --user=admin
+          ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=5 --format=json --path=wordpress --url=artist.fixture.test --user=admin
