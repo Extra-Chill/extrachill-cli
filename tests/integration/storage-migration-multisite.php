@@ -98,6 +98,11 @@ function parity_setup_sites() {
 function parity_seed() {
 	parity_assert( 4 === get_current_blog_id(), 'Seed must bootstrap on the source site.' );
 	ec_register_link_page_post_type();
+	$viewer = username_exists( 'viewer' );
+	if ( ! $viewer ) {
+		$viewer = wp_create_user( 'viewer', 'fixture-password', 'viewer@example.test' );
+	}
+	parity_assert( ! is_wp_error( $viewer ), 'Unprivileged operator creation failed.' );
 	$owner_users = array();
 	foreach ( array( 'owner-one', 'owner-two' ) as $login ) {
 		$user = username_exists( $login );
