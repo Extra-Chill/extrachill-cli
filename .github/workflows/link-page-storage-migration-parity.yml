@@ -81,10 +81,15 @@ jobs:
           set -e
           jq -e '.code == "migration_ability_unavailable"' artifacts/missing-ability.json
           set +e
-          ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=13 --format=json --path=wordpress --url=artist.fixture.test --user=admin --skip-plugins=extrachill-analytics > artifacts/missing-participant.json
+          EC_ANALYTICS_PARTICIPANT_FAULT=missing ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=13 --format=json --path=wordpress --url=artist.fixture.test --user=admin --require="$GITHUB_WORKSPACE/cli/tests/integration/participant-contract-bootstrap.php" > artifacts/missing-participant.json
           test $? -ne 0
           set -e
           jq -e '.code == "required_participant_unavailable" and .data.participant == "analytics"' artifacts/missing-participant.json
+          set +e
+          EC_ANALYTICS_PARTICIPANT_FAULT=outdated ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=13 --format=json --path=wordpress --url=artist.fixture.test --user=admin --require="$GITHUB_WORKSPACE/cli/tests/integration/participant-contract-bootstrap.php" > artifacts/outdated-participant.json
+          test $? -ne 0
+          set -e
+          jq -e '.code == "required_participant_unavailable" and .data.participant == "analytics" and .data.contract_version == "1"' artifacts/outdated-participant.json
       - name: Prove plan apply validate rollback
         run: |
           CLI='./wp-cli.phar extrachill link-pages migrate-storage --path=wordpress --url=artist.fixture.test --user=admin'
