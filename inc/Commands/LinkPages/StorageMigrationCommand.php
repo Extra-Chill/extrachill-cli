@@ -94,7 +94,7 @@ class StorageMigrationCommand {
 				'mode'       => 'rollback',
 				'journal_id' => (string) $assoc_args['rollback'],
 			); } else {
-			if ( ! isset( $assoc_args['source'], $assoc_args['destination'] ) ) {
+				if ( ! isset( $assoc_args['source'], $assoc_args['destination'] ) ) {
 					$this->fail( 'missing_sites', 'Plan and apply require --source and --destination.', array(), $format ); }
 				$source      = $this->resolve_blog_id( $assoc_args['source'] );
 				$destination = $this->resolve_blog_id( $assoc_args['destination'] );
@@ -111,14 +111,17 @@ class StorageMigrationCommand {
 						$this->fail(
 							'required_participant_unavailable',
 							'A caller-required migration participant or exact contract version is unavailable.',
-							array( 'participant' => $participant, 'contract_version' => $contract_version ),
+							array(
+								'participant'      => $participant,
+								'contract_version' => $contract_version,
+							),
 							$format
 						); }
 				}
 				$input = array(
-					'mode'                => ! empty( $assoc_args['apply'] ) ? 'apply' : 'plan',
-					'source_blog_id'      => $source,
-					'destination_blog_id' => $destination,
+					'mode'                  => ! empty( $assoc_args['apply'] ) ? 'apply' : 'plan',
+					'source_blog_id'        => $source,
+					'destination_blog_id'   => $destination,
 					'required_participants' => array_keys( self::REQUIRED_PARTICIPANTS ),
 				);
 				if ( ! empty( $assoc_args['apply'] ) ) {
@@ -127,7 +130,7 @@ class StorageMigrationCommand {
 			$result = $ability->execute( $input );
 			if ( is_wp_error( $result ) ) {
 				$data    = $result->get_error_data();
-				$code    = $result->get_error_code();
+				$code    = (string) $result->get_error_code();
 				$message = '[' . $code . '] ' . $result->get_error_message();
 				if ( false !== stripos( $code, 'permission' ) || false !== stripos( $code, 'forbidden' ) ) {
 					$message .= ' Execute with global --user=<network-admin>; authorization is enforced by the ability.'; }
@@ -137,17 +140,17 @@ class StorageMigrationCommand {
 				if ( 'json' === $format ) {
 					$this->fail( $code, $result->get_error_message(), $data, $format ); }
 				if ( null !== $data ) {
-					$message .= ' Diagnostics: ' . wp_json_encode( $data, JSON_UNESCAPED_SLASHES ); }
+					$message .= ' Diagnostics: ' . $this->encode_json( $data, JSON_UNESCAPED_SLASHES ); }
 				WP_CLI::error( $message );
 			}
 			if ( 'json' === $format ) {
-				WP_CLI::line( wp_json_encode( $result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) );
+				WP_CLI::line( $this->encode_json( $result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) );
 				return; }
 			$rows = array();
 			foreach ( $result as $key => $value ) {
 				$rows[] = array(
 					'field' => $key,
-					'value' => is_scalar( $value ) || null === $value ? ( is_bool( $value ) ? ( $value ? 'true' : 'false' ) : (string) $value ) : wp_json_encode( $value, JSON_UNESCAPED_SLASHES ),
+					'value' => is_scalar( $value ) || null === $value ? ( is_bool( $value ) ? ( $value ? 'true' : 'false' ) : (string) $value ) : $this->encode_json( $value, JSON_UNESCAPED_SLASHES ),
 				);
 			}
 			format_items( 'table', $rows, array( 'field', 'value' ) );
@@ -173,7 +176,7 @@ class StorageMigrationCommand {
 	private function fail( $code, $message, $data, $format ) {
 		if ( 'json' === $format ) {
 			WP_CLI::line(
-				wp_json_encode(
+				$this->encode_json(
 					array(
 						'success' => false,
 						'code'    => (string) $code,
@@ -186,5 +189,11 @@ class StorageMigrationCommand {
 			WP_CLI::halt( 1 );
 		}
 		WP_CLI::error( $message );
+	}
+
+	/** Encode a value without passing false to WP-CLI output methods. */
+	private function encode_json( $value, $flags ) {
+		$encoded = wp_json_encode( $value, $flags );
+		return false === $encoded ? '{"success":false,"code":"json_encoding_failed","message":"Could not encode command output.","data":null}' : $encoded;
 	}
 }
