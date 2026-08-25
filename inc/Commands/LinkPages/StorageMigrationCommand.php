@@ -14,6 +14,11 @@ defined( 'ABSPATH' ) || exit;
 
 /** Thin command adapter over the Link Pages migration ability. */
 class StorageMigrationCommand {
+	/** Caller-required participant contracts for the platform migration. */
+	private const REQUIRED_PARTICIPANTS = array(
+		'analytics' => '1',
+	);
+
 	/**
 	 * Plan, apply, validate, or roll back the feature-owned storage migration.
 	 *
@@ -53,23 +58,33 @@ class StorageMigrationCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function __invoke( $args, $assoc_args ) {
+		$format  = $assoc_args['format'] ?? 'table';
+		$allowed = array( 'source', 'destination', 'apply', 'expect', 'validate', 'rollback', 'format' );
+		$unknown = array_diff( array_keys( $assoc_args ), $allowed );
+		if ( $args ) {
+			$this->fail( 'invalid_positional_arguments', 'This command does not accept positional arguments.', array( 'arguments' => array_values( $args ) ), $format ); }
+		if ( $unknown ) {
+			$this->fail( 'unknown_arguments', 'Unknown argument(s): --' . implode( ', --', $unknown ) . '.', array( 'arguments' => array_values( $unknown ) ), $format ); }
+		if ( ! in_array( $format, array( 'table', 'json' ), true ) ) {
+			$this->fail( 'invalid_format', '--format must be table or json.', array( 'format' => $format ), 'table' ); }
 		$modes = (int) ! empty( $assoc_args['apply'] ) + (int) isset( $assoc_args['validate'] ) + (int) isset( $assoc_args['rollback'] );
 		if ( $modes > 1 ) {
-			WP_CLI::error( '--apply, --validate, and --rollback are mutually exclusive.' ); }
+			$this->fail( 'conflicting_modes', '--apply, --validate, and --rollback are mutually exclusive.', array(), $format ); }
 		if ( isset( $assoc_args['expect'] ) && empty( $assoc_args['apply'] ) ) {
-			WP_CLI::error( '--expect may only be used with --apply.' ); }
+			$this->fail( 'invalid_expectation_mode', '--expect may only be used with --apply.', array(), $format ); }
 		if ( ! empty( $assoc_args['apply'] ) && empty( $assoc_args['expect'] ) ) {
-			WP_CLI::error( '--apply requires --expect=<fingerprint> from a prior plan.' ); }
+			$this->fail( 'missing_fingerprint', '--apply requires --expect=<fingerprint> from a prior plan.', array(), $format ); }
 		if ( ( isset( $assoc_args['validate'] ) || isset( $assoc_args['rollback'] ) ) && ( isset( $assoc_args['source'] ) || isset( $assoc_args['destination'] ) || isset( $assoc_args['expect'] ) ) ) {
-			WP_CLI::error( 'Journal modes cannot be combined with source, destination, or expectation arguments.' ); }
-		$format = $assoc_args['format'] ?? 'table';
-		if ( ! in_array( $format, array( 'table', 'json' ), true ) ) {
-			WP_CLI::error( '--format must be table or json.' ); }
+			$this->fail( 'conflicting_journal_arguments', 'Journal modes cannot be combined with source, destination, or expectation arguments.', array(), $format ); }
+		if ( isset( $assoc_args['validate'] ) && '' === trim( (string) $assoc_args['validate'] ) ) {
+			$this->fail( 'missing_journal_id', '--validate requires a non-empty journal ID.', array(), $format ); }
+		if ( isset( $assoc_args['rollback'] ) && '' === trim( (string) $assoc_args['rollback'] ) ) {
+			$this->fail( 'missing_journal_id', '--rollback requires a non-empty journal ID.', array(), $format ); }
 		if ( ! function_exists( 'wp_get_ability' ) ) {
-			WP_CLI::error( 'Abilities API not available (requires WordPress 6.9+).' ); }
+			$this->fail( 'abilities_api_unavailable', 'Abilities API not available (requires WordPress 6.9+).', array(), $format ); }
 		$ability = wp_get_ability( 'extrachill/migrate-link-page-storage' );
 		if ( ! $ability ) {
-			WP_CLI::error( 'extrachill/migrate-link-page-storage ability not available. Ensure Extra Chill Link Pages is network-active and up to date.' ); }
+			$this->fail( 'migration_ability_unavailable', 'extrachill/migrate-link-page-storage ability not available. Ensure Extra Chill Link Pages is network-active and up to date.', array(), $format ); }
 		if ( isset( $assoc_args['validate'] ) ) {
 			$input = array(
 				'mode'       => 'validate',
@@ -79,19 +94,32 @@ class StorageMigrationCommand {
 				'mode'       => 'rollback',
 				'journal_id' => (string) $assoc_args['rollback'],
 			); } else {
-				if ( ! isset( $assoc_args['source'], $assoc_args['destination'] ) ) {
-					WP_CLI::error( 'Plan and apply require --source and --destination.' ); }
+			if ( ! isset( $assoc_args['source'], $assoc_args['destination'] ) ) {
+					$this->fail( 'missing_sites', 'Plan and apply require --source and --destination.', array(), $format ); }
 				$source      = $this->resolve_blog_id( $assoc_args['source'] );
 				$destination = $this->resolve_blog_id( $assoc_args['destination'] );
-				if ( ! $source || ! $destination ) {
-					WP_CLI::error( 'Source and destination must resolve to existing positive blog IDs.' ); }
+				if ( ! $source || ! $destination || $source === $destination || ! get_site( $source ) || ! get_site( $destination ) ) {
+					$this->fail( 'invalid_sites', 'Source and destination must resolve to distinct existing positive blog IDs.', array(), $format ); }
 				if ( get_current_blog_id() !== $source ) {
-					WP_CLI::error( sprintf( 'Run this command on source blog %d so all required owner participants are active. Use --url=<source-url> and --user=<network-admin>.', $source ) ); }
+					$this->fail( 'wrong_source_site', sprintf( 'Run this command on source blog %d so all required owner participants are active. Use --url=<source-url> and global --user=<network-admin>.', $source ), array( 'source_blog_id' => $source ), $format ); }
+				$participants = function_exists( 'ec_link_page_migration_participant_registry' ) ? ec_link_page_migration_participant_registry()->snapshot() : array();
+				$registered   = array();
+				foreach ( $participants as $participant ) {
+					$registered[ $participant['name'] ?? '' ] = (string) ( $participant['contract_version'] ?? '' ); }
+				foreach ( self::REQUIRED_PARTICIPANTS as $participant => $contract_version ) {
+					if ( ( $registered[ $participant ] ?? '' ) !== $contract_version ) {
+						$this->fail(
+							'required_participant_unavailable',
+							'A caller-required migration participant or exact contract version is unavailable.',
+							array( 'participant' => $participant, 'contract_version' => $contract_version ),
+							$format
+						); }
+				}
 				$input = array(
 					'mode'                => ! empty( $assoc_args['apply'] ) ? 'apply' : 'plan',
 					'source_blog_id'      => $source,
 					'destination_blog_id' => $destination,
-					'required_participants' => array( 'analytics' ),
+					'required_participants' => array_keys( self::REQUIRED_PARTICIPANTS ),
 				);
 				if ( ! empty( $assoc_args['apply'] ) ) {
 					$input['expected_fingerprint'] = (string) $assoc_args['expect']; }
@@ -103,18 +131,13 @@ class StorageMigrationCommand {
 				$message = '[' . $code . '] ' . $result->get_error_message();
 				if ( false !== stripos( $code, 'permission' ) || false !== stripos( $code, 'forbidden' ) ) {
 					$message .= ' Execute with global --user=<network-admin>; authorization is enforced by the ability.'; }
-				if ( is_array( $data ) && ! empty( $data['journal_id'] ) && in_array( $data['journal_status'] ?? '', array( 'applying', 'applied', 'failed', 'rolling_back' ), true ) ) {
+				$journal_status = is_array( $data ) ? ( $data['journal_status'] ?? $data['status'] ?? '' ) : '';
+				if ( is_array( $data ) && ! empty( $data['journal_id'] ) && in_array( $journal_status, array( 'applying', 'applied', 'failed' ), true ) ) {
 					$message .= ' Journal: ' . $data['journal_id'] . '. Roll back with: wp extrachill link-pages migrate-storage --rollback=' . $data['journal_id']; }
 				if ( 'json' === $format ) {
-					$message = wp_json_encode(
-						array(
-							'success' => false,
-							'code'    => $code,
-							'message' => $result->get_error_message(),
-							'data'    => $data,
-						),
-						JSON_UNESCAPED_SLASHES
-					); }
+					$this->fail( $code, $result->get_error_message(), $data, $format ); }
+				if ( null !== $data ) {
+					$message .= ' Diagnostics: ' . wp_json_encode( $data, JSON_UNESCAPED_SLASHES ); }
 				WP_CLI::error( $message );
 			}
 			if ( 'json' === $format ) {
@@ -144,5 +167,24 @@ class StorageMigrationCommand {
 		if ( ctype_digit( $value ) ) {
 			return (int) $value; }
 		return function_exists( 'ec_get_blog_id' ) ? (int) ec_get_blog_id( $value ) : 0;
+	}
+
+	/** Emit one format-correct command failure. */
+	private function fail( $code, $message, $data, $format ) {
+		if ( 'json' === $format ) {
+			WP_CLI::line(
+				wp_json_encode(
+					array(
+						'success' => false,
+						'code'    => (string) $code,
+						'message' => (string) $message,
+						'data'    => $data,
+					),
+					JSON_UNESCAPED_SLASHES
+				)
+			);
+			WP_CLI::halt( 1 );
+		}
+		WP_CLI::error( $message );
 	}
 }
