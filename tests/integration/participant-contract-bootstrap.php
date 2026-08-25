@@ -1,7 +1,7 @@
 <?php
 /** Fault-inject the Analytics participant contract in a disposable CLI process. */
 
-add_action(
+WP_CLI::add_wp_hook(
 	'plugins_loaded',
 	static function () {
 		$mode = getenv( 'EC_ANALYTICS_PARTICIPANT_FAULT' );
