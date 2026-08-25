@@ -75,20 +75,16 @@ jobs:
           test $? -ne 0
           set -e
           jq -e '.code and .data != null' artifacts/permission.json
-          ./wp-cli.phar plugin deactivate extrachill-link-pages --network --path=wordpress
           set +e
-          ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=13 --format=json --path=wordpress --url=artist.fixture.test --user=admin > artifacts/missing-ability.json
+          ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=13 --format=json --path=wordpress --url=artist.fixture.test --user=admin --skip-plugins=extrachill-link-pages > artifacts/missing-ability.json
           test $? -ne 0
           set -e
           jq -e '.code == "migration_ability_unavailable"' artifacts/missing-ability.json
-          ./wp-cli.phar plugin activate extrachill-link-pages --network --path=wordpress
-          ./wp-cli.phar plugin deactivate extrachill-analytics --network --path=wordpress
           set +e
-          ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=13 --format=json --path=wordpress --url=artist.fixture.test --user=admin > artifacts/missing-participant.json
+          ./wp-cli.phar extrachill link-pages migrate-storage --source=4 --destination=13 --format=json --path=wordpress --url=artist.fixture.test --user=admin --skip-plugins=extrachill-analytics > artifacts/missing-participant.json
           test $? -ne 0
           set -e
           jq -e '.code == "required_participant_unavailable" and .data.participant == "analytics"' artifacts/missing-participant.json
-          ./wp-cli.phar plugin activate extrachill-analytics --network --path=wordpress
       - name: Prove plan apply validate rollback
         run: |
           CLI='./wp-cli.phar extrachill link-pages migrate-storage --path=wordpress --url=artist.fixture.test --user=admin'
