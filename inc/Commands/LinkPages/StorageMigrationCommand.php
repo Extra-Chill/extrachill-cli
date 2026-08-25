@@ -129,16 +129,19 @@ class StorageMigrationCommand {
 			}
 			$result = $ability->execute( $input );
 			if ( is_wp_error( $result ) ) {
-				$data    = $result->get_error_data();
-				$code    = (string) $result->get_error_code();
-				$message = '[' . $code . '] ' . $result->get_error_message();
+				$data          = $result->get_error_data();
+				$code          = (string) $result->get_error_code();
+				$error_message = $result->get_error_message();
+				$message       = '[' . $code . '] ' . $error_message;
 				if ( false !== stripos( $code, 'permission' ) || false !== stripos( $code, 'forbidden' ) ) {
-					$message .= ' Execute with global --user=<network-admin>; authorization is enforced by the ability.'; }
+					$guidance       = ' Execute with global --user=<network-admin>; authorization is enforced by the ability.';
+					$error_message .= $guidance;
+					$message       .= $guidance; }
 				$journal_status = is_array( $data ) ? ( $data['journal_status'] ?? $data['status'] ?? '' ) : '';
 				if ( is_array( $data ) && ! empty( $data['journal_id'] ) && in_array( $journal_status, array( 'applying', 'applied', 'failed' ), true ) ) {
 					$message .= ' Journal: ' . $data['journal_id'] . '. Roll back with: wp extrachill link-pages migrate-storage --rollback=' . $data['journal_id']; }
 				if ( 'json' === $format ) {
-					$this->fail( $code, $result->get_error_message(), $data, $format ); }
+					$this->fail( $code, $error_message, $data, $format ); }
 				if ( null !== $data ) {
 					$message .= ' Diagnostics: ' . $this->encode_json( $data, JSON_UNESCAPED_SLASHES ); }
 				WP_CLI::error( $message );
