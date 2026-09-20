@@ -25,9 +25,9 @@ jobs:
       - uses: actions/checkout@v4
         with: { path: cli }
       - uses: actions/checkout@v4
-        with: { repository: Extra-Chill/extrachill-link-pages, ref: feat-11-storage-migration, path: link-pages }
+        with: { repository: Extra-Chill/extrachill-link-pages, ref: main, path: link-pages }
       - uses: actions/checkout@v4
-        with: { repository: Extra-Chill/extrachill-artist-platform, ref: feat-205-link-page-migration, path: artist }
+        with: { repository: Extra-Chill/extrachill-artist-platform, ref: main, path: artist }
       - uses: actions/checkout@v4
         with: { repository: Extra-Chill/extrachill-analytics, ref: feat-257-link-page-migration, path: analytics }
       - uses: actions/checkout@v4
